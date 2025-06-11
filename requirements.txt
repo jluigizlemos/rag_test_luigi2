@@ -1,6 +1,8 @@
 python-telegram-bot==20.7
 langchain==0.2.0
 openai
-faiss-cpu
+chromadb
 python-dotenv
-PyMuPDF
+pdfplumber
+langchain-community
+tiktoken

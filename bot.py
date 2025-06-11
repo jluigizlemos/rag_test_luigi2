@@ -2,36 +2,44 @@ import os
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from langchain.document_loaders import TextLoader, PyPDFLoader
+from langchain.document_loaders import TextLoader
+import pdfplumber
+from langchain.schema import Document
 from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
+from langchain.vectorstores import Chroma
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import RetrievalQA
 
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-EMBED_PATH = "rag_index.faiss"
+CHROMA_DIR = "chroma_index"
 DOCS_DIR = "docs"
 
-# load or create FAISS index
+# Função para carregar PDF usando pdfplumber
+def load_pdf_with_pdfplumber(path):
+    docs = []
+    with pdfplumber.open(path) as pdf:
+        for i, page in enumerate(pdf.pages):
+            text = page.extract_text()
+            if text:
+                docs.append(Document(page_content=text, metadata={"source": path, "page": i+1}))
+    return docs
+
+# load or create Chroma index
 def get_retriever():
     embeddings = OpenAIEmbeddings()
-    if os.path.exists(EMBED_PATH):
-        return FAISS.load_local(".", embeddings).as_retriever()
+    if os.path.exists(CHROMA_DIR) and os.listdir(CHROMA_DIR):
+        vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
     else:
-        vectorstore = FAISS.from_documents([], embeddings)
-        vectorstore.save_local(".", EMBED_PATH)
-        return vectorstore.as_retriever()
+        vectorstore = Chroma.from_documents([], embeddings, persist_directory=CHROMA_DIR)
+    return vectorstore.as_retriever()
 
 def add_docs_to_index(docs):
     embeddings = OpenAIEmbeddings()
-    if os.path.exists(EMBED_PATH):
-        vectorstore = FAISS.load_local(".", embeddings)
-        vectorstore.add_documents(docs)
-    else:
-        vectorstore = FAISS.from_documents(docs, embeddings)
-    vectorstore.save_local(".", EMBED_PATH)
+    vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+    vectorstore.add_documents(docs)
+    vectorstore.persist()
 
 retriever = get_retriever()
 qa = RetrievalQA.from_chain_type(llm=ChatOpenAI(), retriever=retriever)
@@ -48,12 +56,13 @@ async def handle_docs(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     os.makedirs(DOCS_DIR, exist_ok=True)
     path = f"{DOCS_DIR}/{file.file_name}"
     try:
-        await file.get_file().download_to_drive(path)
+        telegram_file = await file.get_file()
+        await telegram_file.download_to_drive(path)
         if ext == ".txt":
             loader = TextLoader(path)
+            docs = loader.load()
         else:
-            loader = PyPDFLoader(path)
-        docs = loader.load()
+            docs = load_pdf_with_pdfplumber(path)
         add_docs_to_index(docs)
         global retriever, qa
         retriever = get_retriever()
