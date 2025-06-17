@@ -62,7 +62,7 @@ python bot.py
 
 ## Observações
 - Os arquivos enviados ao bot serão salvos na pasta `docs/`.
-- O índice FAISS é salvo como `rag_index.faiss` na raiz do projeto.
+- O índice Chroma é salvo na pasta `chroma_index/` na raiz do projeto.
 - Suporte a arquivos `.txt` e `.pdf`.
 
 ---
